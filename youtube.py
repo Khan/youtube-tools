@@ -67,17 +67,21 @@ class YouTubeVideo(object):
     properties.
     """
 
-    def __init__(self, xml):
-        self.root = etree.fromstring(xml)
+    def __init__(self, root=None, nsmap=None):
+        self.root = root
+        self._xpath_eval = self._xpath_evaluator(self.root, nsmap)
 
+    @staticmethod
+    def _xpath_evaluator(root, nsmap=None):
         # This seems necessary to avoid having to prefix tag names with the
         # full namespace URL every time
-        self._xpath_eval = etree.XPathEvaluator(self.root)
-        for prefix, url in self.root.nsmap.iteritems():
+        xpath = etree.XPathEvaluator(root)
+        for prefix, url in (nsmap or root.nsmap).iteritems():
             # lxml and xpath don't like empty prefixes, so we give a name to
             # the Atom namespace
             prefix = prefix or "atom"
-            self._xpath_eval.register_namespace(prefix, url)
+            xpath.register_namespace(prefix, url)
+        return xpath
 
     @classmethod
     def get(cls, video_id, read_only=True):
@@ -91,7 +95,32 @@ class YouTubeVideo(object):
             format = '/feeds/api/users/default/uploads/%s?v=2'
 
         resp = _youtube_api_urlopen(format % video_id)
-        return cls(resp.read())
+        root = etree.parse(resp).getroot()
+        return cls(root)
+
+    @classmethod
+    def all_for_user(cls, user='default'):
+        """Return a generator that yields all of a user's uploads. If no user
+        is passed, the uploads of the authenticated user are returned.
+        """
+        per_page = 50  # YouTube's maximum allowed
+        url = "/feeds/api/users/%s/uploads?v=2&max-results=%d" % (
+            user, per_page)
+
+        while url is not None:
+            resp = _youtube_api_urlopen(url)
+            feed = etree.parse(resp).getroot()
+            xpath = cls._xpath_evaluator(feed)
+
+            for entry in xpath('atom:entry'):
+                yield YouTubeVideo(root=entry, nsmap=feed.nsmap)
+
+            # URL for the next page of results
+            nexts = xpath('atom:link[@rel="next"]')
+            if nexts:
+                url = nexts[0].get('href')
+            else:
+                url = None
 
     @property
     def title(self):
