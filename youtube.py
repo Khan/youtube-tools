@@ -123,6 +123,12 @@ class YouTubeVideo(object):
                 url = None
 
     @property
+    def id(self):
+        els = self._xpath_eval('media:group/yt:videoid')
+        assert len(els) == 1
+        return els[0].text
+
+    @property
     def title(self):
         els = self._xpath_eval('media:group/media:title')
         assert len(els) == 1
@@ -179,5 +185,5 @@ class YouTubeVideo(object):
         resp.read()
 
     def __repr__(self):
-        return "<YouTubeVideo title: %r description: %r>" % (
-            self.title, self.description)
+        return "<YouTubeVideo id: %r title: %r description: %r>" % (
+            self.id, self.title, self.description)
