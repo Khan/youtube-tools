@@ -4,21 +4,50 @@ API. Currently included are:
 YouTubeVideo: A class to represent a YouTube video.
 """
 
+import json
+import time
+import urllib
 import urllib2
 import urlparse
+
 from lxml import etree
 
 import secrets
+
+
+_access_token_cache = (None, None)  # (token, expires)
+
+
+def get_access_token():
+    """Return an access token useable immediately, ensuring to renew the token
+    if the last retrieved one has expired.
+    """
+    global _access_token_cache
+    expires = _access_token_cache[1]
+
+    # If the token expires within 10 seconds, renew it now
+    if expires is None or expires - time.time() < 10:
+        resp = urllib2.urlopen(
+            'https://accounts.google.com/o/oauth2/token',
+            urllib.urlencode({
+                'client_id': secrets.oauth_client_id,
+                'client_secret': secrets.oauth_client_secret,
+                'grant_type': 'refresh_token',
+                'refresh_token': secrets.youtube_refresh_token,
+            }))
+        data = json.loads(resp.read())
+
+        _access_token_cache = (
+            data['access_token'], time.time() + data['expires_in'])
+
+    return _access_token_cache[0]
 
 
 def _youtube_api_urlopen(path, data=None, method='GET',
                          content_type='application/x-www-form-urlencoded'):
     headers = {
         'X-GData-Key': 'key=' + secrets.youtube_developer_key,
-
-        # TODO(alpert): Access tokens expire after an hour -- figure out
-        # how to use refresh tokens properly
-        'Authorization': 'Bearer ' + secrets.youtube_access_token,
+        'Authorization': 'Bearer ' + get_access_token(),
 
         'Content-Type': content_type,
     }

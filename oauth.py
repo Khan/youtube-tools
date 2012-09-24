@@ -11,4 +11,4 @@ token = gdata.gauth.OAuth2Token(
 print token.generate_authorize_url()
 code = raw_input("Enter the resulting code: ")
 token.get_access_token(code)
-print "Access token: %s" % token.access_token
+print "Refresh token: %s" % token.refresh_token
