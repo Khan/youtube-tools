@@ -1,68 +1,125 @@
 """This file contains some lightweight tools for interacting with the YouTube
 API. Currently included are:
 
-get_video: Return a YouTubeVideo with a given video ID.
-
 YouTubeVideo: A class to represent a YouTube video.
 """
 
-import gdata.gauth
-import gdata.youtube.service
+import urllib2
+import urlparse
+from lxml import etree
 
 import secrets
 
-_service = gdata.youtube.service.YouTubeService()
-_service.email, _service.password = secrets.get_youtube_password()
-_service.developer_key = secrets.youtube_developer_key
-_service.ProgrammaticLogin()
+
+def _youtube_api_urlopen(path, data=None, method='GET',
+                         content_type='application/x-www-form-urlencoded'):
+    headers = {
+        'X-GData-Key': 'key=' + secrets.youtube_developer_key,
+
+        # TODO(alpert): Access tokens expire after an hour -- figure out
+        # how to use refresh tokens properly
+        'Authorization': 'Bearer ' + secrets.youtube_access_token,
+
+        'Content-Type': content_type,
+    }
+
+    req = urllib2.Request(
+        urlparse.urljoin('https://gdata.youtube.com/', path),
+        data, headers=headers)
+
+    # Ugh -- from http://stackoverflow.com/a/9023005/49485.
+    req.get_method = lambda: method
+
+    return urllib2.urlopen(req)
 
 
 class YouTubeVideo(object):
-    """A light wrapper around gdata.youtube.YouTubeVideoEntry so we can work
-    with a cleaner API that hides the XML format of the GData API output.
+    """A wrapper around the YouTube API for retrieving and updating video
+    properties.
     """
 
-    def __init__(self, video_entry):
-        self.video_entry = video_entry
+    def __init__(self, xml):
+        self.root = etree.fromstring(xml)
 
-    def __repr__(self):
-        return "<YouTubeVideo title: %r>" % self.title
+        # This seems necessary to avoid having to prefix tag names with the
+        # full namespace URL every time
+        self._xpath_eval = etree.XPathEvaluator(self.root)
+        for prefix, url in self.root.nsmap.iteritems():
+            # lxml and xpath don't like empty prefixes, so we give a name to
+            # the Atom namespace
+            prefix = prefix or "atom"
+            self._xpath_eval.register_namespace(prefix, url)
+
+    @classmethod
+    def get(cls, video_id, read_only=True):
+        """Return a YouTubeVideo with the given video ID. If the authenticated
+        user owns the video, pass read_only=False to fetch from the user's
+        uploads in order to allow editing.
+        """
+        if read_only:
+            format = '/feeds/api/videos/%s?v=2'
+        else:
+            format = '/feeds/api/users/default/uploads/%s?v=2'
+
+        resp = _youtube_api_urlopen(format % video_id)
+        return cls(resp.read())
 
     @property
     def title(self):
-        return self.video_entry.media.title.text
+        els = self._xpath_eval('media:group/media:title')
+        assert len(els) == 1
+        return els[0].text
 
     @property
     def description(self):
-        return self.video_entry.media.description.text
-
-    @description.setter  # @Nolint
-    def description(self, value):
-        self.video_entry.media.description.text = value
+        els = self._xpath_eval('media:group/media:description')
+        assert len(els) == 1
+        return els[0].text
 
     @property
-    def duration(self):
-        return int(self.video_entry.media.duration.seconds)
+    def _edit_url(self):
+        """Return the URL to which a PUT or PATCH request to update the video
+        should be sent.
+        """
+        els = self._xpath_eval('atom:link[@rel="edit"]')
+        if len(els) == 1:
+            return els[0].get('href')
 
-    def put(self):
-        assert any(link.rel == 'edit' for link in self.video_entry.link), \
-            'Video entry is not editable'
-        result = _service.UpdateVideoEntry(self.video_entry)
-        assert result, 'Video entry update failed'
+    def update(self, **attributes):
+        """Update a video's attributes.
 
+        Example:
+            video.update(title='monkey')
 
-def get_video(video_id, read_only=True):
-    """Return a YouTubeVideo with the given video ID. If the authenticated user
-    owns the video, use read_only=False to fetch from the user's uploads in
-    order to allow editing.
-    """
-    if read_only:
-        format = '/feeds/api/videos/%s'
-    else:
-        format = '/feeds/api/users/default/uploads/%s'
+        Currently only title and description are supported.
+        """
+        edit_url = self._edit_url
+        assert edit_url is not None, 'Video is not editable'
 
-    entry = _service.GetYouTubeVideoEntry(format % video_id)
-    return YouTubeVideo(entry)
+        # Copy over the xmlns attributes
+        nsmap = self.root.nsmap
+        entry = etree.Element('entry', nsmap=nsmap)
+        entry.set("{%s}fields" % nsmap['gd'],
+                  'media:group(media:title,media:keywords)')
 
-# TODO(alpert): Figure out why the privacy settings are lost when a video entry
-# is saved.
+        group = etree.Element("{%s}group" % nsmap['media'])
+        entry.append(group)
+
+        title = etree.Element("{%s}title" % nsmap['media'])
+        title.set('type', 'plain')
+        title.text = attributes.get('title', self.title)
+        group.append(title)
+
+        description = etree.Element("{%s}description" % nsmap['media'])
+        description.set('type', 'plain')
+        description.text = attributes.get('description', self.description)
+        group.append(description)
+
+        xml = etree.tostring(entry)
+        resp = _youtube_api_urlopen(
+            edit_url, data=xml, content_type='application/xml', method='PATCH')
+        resp.read()
+
+    def __repr__(self):
+        return "<YouTubeVideo title: %r description: %r>" % (
+            self.title, self.description)
