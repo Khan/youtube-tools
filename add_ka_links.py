@@ -5,8 +5,10 @@ Set up secrets.py, then just run me as
 
     python add_ka_links.py
 """
+import argparse
 import json
 import re
+import time
 import urllib2
 
 import youtube
@@ -47,36 +49,57 @@ def all_youtube_ids(library):
     return set(iter(library))
 
 
-def add_ka_links(youtube_ids):
+def add_ka_links(youtube_ids, dry_run):
     updated = 0
+    unpublished = 0
     already_annotated = 0
     not_in_topic_tree = 0
 
-    for video in youtube.YouTubeVideo.all_for_user():
-        if video.id in youtube_ids:
-            if description_is_annotated(video.description):
-                print ".. skipping %s (already annotated)" % video.id
-                already_annotated += 1
+    try:
+        for video in youtube.YouTubeVideo.all_for_user():
+            if video.id in youtube_ids:
+                if video.is_draft:
+                    # YouTube returns an error if we try to update these
+                    print ".. skipping %s (unpublished)" % video.id
+                    unpublished += 1
+                elif description_is_annotated(video.description):
+                    print ".. skipping %s (already annotated)" % video.id
+                    already_annotated += 1
+                else:
+                    print ".. updating description for %s" % video.id
+
+                    url = "http://www.khanacademy.org/video?v=%s" % video.id
+                    if not dry_run:
+                        video.update(description=annotate_description(
+                            video.description, url))
+
+                        # YouTube returns 403s if you make requests too fast,
+                        # but sleeping 1 second for each video seemed to be
+                        # enough to get through ~2500 videos
+                        time.sleep(1)
+
+                    updated += 1
             else:
-                print ".. updating description for %s..." % video.id,
-
-                url = "http://www.khanacademy.org/video?v=%s" % video.id
-                video.update(
-                    description=annotate_description(video.description, url))
-                updated += 1
-                print "done"
-        else:
-            print ".. skipping %s (not in topic tree)" % video.id
-            not_in_topic_tree += 1
-
-    print "%d updated, %d already annotated, %d not in topic tree" % (
-        updated, already_annotated, not_in_topic_tree)
+                print ".. skipping %s (not in topic tree)" % video.id
+                not_in_topic_tree += 1
+    finally:
+        print (
+            "%d updated, %d unpublished, %d already annotated, "
+            "%d not in topic tree" % (
+                updated, unpublished, already_annotated, not_in_topic_tree))
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Add Khan Academy links to YouTube videos.')
+    parser.add_argument(
+        '-n', '--dry-run', action='store_true', default=False,
+        help='skip the actual description update requests')
+    args = parser.parse_args()
+
     print "Fetching Khan Academy video library..."
     library = fetch_ka_library()
     youtube_ids = all_youtube_ids(library)
 
     print "Fetching YouTube uploaded videos..."
-    add_ka_links(youtube_ids)
+    add_ka_links(youtube_ids, args.dry_run)

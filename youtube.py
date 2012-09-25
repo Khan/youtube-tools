@@ -141,6 +141,10 @@ class YouTubeVideo(object):
         return els[0].text
 
     @property
+    def is_draft(self):
+        return bool(self._xpath_eval('app:control/app:draft'))
+
+    @property
     def _edit_url(self):
         """Return the URL to which a PUT or PATCH request to update the video
         should be sent.
