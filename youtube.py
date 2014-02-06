@@ -168,7 +168,7 @@ class YouTubeVideo(object):
         nsmap = self.root.nsmap
         entry = etree.Element('entry', nsmap=nsmap)
         entry.set("{%s}fields" % nsmap['gd'],
-                  'media:group(media:title,media:keywords)')
+                  'media:group(media:title,media:description)')
 
         group = etree.Element("{%s}group" % nsmap['media'])
         entry.append(group)
@@ -184,9 +184,24 @@ class YouTubeVideo(object):
         group.append(description)
 
         xml = etree.tostring(entry)
-        resp = _youtube_api_urlopen(
-            edit_url, data=xml, content_type='application/xml', method='PATCH')
-        resp.read()
+        tries = 0
+        while True:
+            try:
+                resp = _youtube_api_urlopen(
+                    edit_url, data=xml, content_type='application/xml',
+                    method='PATCH')
+                resp.read()
+                return
+            except urllib2.HTTPError, e:
+                if e.code == 503:
+                    tries += 1
+                    if tries >= 8:
+                        raise
+                    else:
+                        print 'retrying', tries
+                        time.sleep(tries ** 3)
+                else:
+                    raise
 
     def __repr__(self):
         return "<YouTubeVideo id: %r title: %r description: %r>" % (
