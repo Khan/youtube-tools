@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """This script adds links to khanacademy.org to all the videos in a YouTube
 account that are in the topic tree.
 
@@ -13,6 +14,18 @@ import urllib2
 
 import youtube
 
+_DESCRIPTION_PREAMBLES = {
+    # subdomain: text
+    'www': u"More free lessons at:",
+    'es': u"Más lecciones gratuitas en:",
+    'pt': u"Mais aulas gratuitas em:",
+}
+
+# Keep any past preambles here so that we can properly unannotate descriptions
+_ALL_POSSIBLE_PREAMBLES = _DESCRIPTION_PREAMBLES.values() + [
+    u"Learn more:",
+]
+
 
 def description_is_annotated(description):
     return description and unannotate_description(description) != description
@@ -20,23 +33,26 @@ def description_is_annotated(description):
 
 def unannotate_description(description):
     return re.sub(
-        r'^\s*(?:Learn more|More free lessons at): https?://.+(?:\n\s*|$)', '',
+        r'^\s*(?:%s) https?://.+(?:\n\s*|$)' % '|'.join([
+            re.escape(p) for p in _ALL_POSSIBLE_PREAMBLES]),
+        '',
         description or '')
 
 
-def annotate_description(description, url):
+def annotate_description(description, lang, url):
     # Make sure not to double-annotate descriptions
     if description_is_annotated(description):
         description = unannotate_description(description)
-    header = "More free lessons at: %s" % url
+    header = "%s %s" % (_DESCRIPTION_PREAMBLES[lang], url)
     if description:
         return header + '\n' + description
     else:
         return header
 
 
-def fetch_ka_library():
-    resp = urllib2.urlopen('https://www.khanacademy.org/api/v1/topictree')
+def fetch_ka_library(lang):
+    resp = urllib2.urlopen(
+        'https://%s.khanacademy.org/api/v1/topictree?kind=Video' % lang)
     return json.load(resp)
 
 
@@ -48,12 +64,12 @@ def all_youtube_ids(library):
                 for youtube_id in iter(child):
                     yield youtube_id
         elif node['kind'] == "Video":
-            yield node['youtube_id']
+            yield node['translated_youtube_id']
 
     return set(iter(library))
 
 
-def add_ka_links(youtube_ids, dry_run):
+def add_ka_links(youtube_ids, dry_run, lang):
     updated = 0
     unpublished = 0
     already_annotated = 0
@@ -63,8 +79,8 @@ def add_ka_links(youtube_ids, dry_run):
     try:
         for video in youtube.YouTubeVideo.all_for_user():
             if video.id in youtube_ids:
-                url = "http://www.khanacademy.org/video?v=%s" % video.id
-                new_desc = annotate_description(video.description, url)
+                url = "http://%s.khanacademy.org/video?v=%s" % (lang, video.id)
+                new_desc = annotate_description(video.description, lang, url)
                 if video.is_draft:
                     # YouTube returns an error if we try to update these
                     print ".. skipping %s (unpublished)" % video.id
@@ -76,7 +92,19 @@ def add_ka_links(youtube_ids, dry_run):
                     print ".. updating description for %s" % video.id
 
                     if not dry_run:
-                        video.update(description=new_desc)
+                        # YouTube refuses to update videos which contain
+                        # one-letter keywords; many Spanish videos seem to have
+                        # 'y' as a keyword, so strip it out
+                        keywords = (video.keywords.split(', ')
+                                    if video.keywords else [])
+                        filtered_keywords = [k for k in keywords if len(k) > 1]
+                        if len(keywords) > len(filtered_keywords):
+                            print ".. .. filtering keywords %s" % keywords
+                            keywords = filtered_keywords
+
+                        video.update(
+                            description=new_desc,
+                            keywords=', '.join(keywords))
 
                         # YouTube returns 403s if you make requests too fast,
                         # but sleeping 1 second for each video seemed to be
@@ -109,11 +137,15 @@ if __name__ == '__main__':
     parser.add_argument(
         '-n', '--dry-run', action='store_true', default=False,
         help='skip the actual description update requests')
+    parser.add_argument(
+        '-l', '--language', default='www',
+        help='subdomain to use when grabbing topictree and making links (www, '
+        'es, pt, etc.)')
     args = parser.parse_args()
 
     print "Fetching Khan Academy video library..."
-    library = fetch_ka_library()
+    library = fetch_ka_library(args.language)
     youtube_ids = all_youtube_ids(library)
 
     print "Fetching YouTube uploaded videos..."
-    add_ka_links(youtube_ids, args.dry_run)
+    add_ka_links(youtube_ids, args.dry_run, args.language)

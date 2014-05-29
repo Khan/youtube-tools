@@ -141,6 +141,12 @@ class YouTubeVideo(object):
         return els[0].text
 
     @property
+    def keywords(self):
+        els = self._xpath_eval('media:group/media:keywords')
+        assert len(els) == 1
+        return els[0].text
+
+    @property
     def is_draft(self):
         return bool(self._xpath_eval('app:control/app:draft'))
 
@@ -167,28 +173,43 @@ class YouTubeVideo(object):
         # Copy over the xmlns attributes
         nsmap = self.root.nsmap
         entry = etree.Element('entry', nsmap=nsmap)
-        entry.set("{%s}fields" % nsmap['gd'],
-                  'media:group(media:title,media:description)')
 
         group = etree.Element("{%s}group" % nsmap['media'])
         entry.append(group)
 
-        title = etree.Element("{%s}title" % nsmap['media'])
-        title.set('type', 'plain')
-        title.text = attributes.get('title', self.title)
-        group.append(title)
+        fields = []
 
-        description = etree.Element("{%s}description" % nsmap['media'])
-        description.set('type', 'plain')
-        description.text = attributes.get('description', self.description)
-        group.append(description)
+        if 'title' in attributes:
+            title = etree.Element("{%s}title" % nsmap['media'])
+            title.set('type', 'plain')
+            title.text = attributes['title']
+            group.append(title)
+            fields.append('media:title')
 
-        xml = etree.tostring(entry)
+        if 'description' in attributes:
+            description = etree.Element("{%s}description" % nsmap['media'])
+            description.set('type', 'plain')
+            description.text = attributes['description']
+            group.append(description)
+            fields.append('media:description')
+
+        if 'keywords' in attributes:
+            keywords = etree.Element("{%s}keywords" % nsmap['media'])
+            keywords.set('type', 'plain')
+            keywords.text = attributes['keywords']
+            group.append(keywords)
+            fields.append('media:keywords')
+
+        entry.set("{%s}fields" % nsmap['gd'],
+                  'media:group(%s)' % ','.join(fields))
+
+        xml = etree.tostring(entry, encoding='unicode')
         tries = 0
         while True:
             try:
                 resp = _youtube_api_urlopen(
-                    edit_url, data=xml, content_type='application/xml',
+                    edit_url, data=xml.encode('utf-8'),
+                    content_type='application/xml; charset=utf-8',
                     method='PATCH')
                 resp.read()
                 return
