@@ -33,6 +33,19 @@ class DescriptionAnnotationTest(unittest.TestCase):
         desc2 = add_ka_links.unannotate_description(desc)
         self.assertEqual("Monet's Cliff Walk", desc2)
 
+        desc = ("Monet's Cliff Walk\n"
+                "Mais aulas gratuitas em: "
+                "http://pt.khanacademy.org/video?v=2aUFB9hQncQ")
+        desc2 = add_ka_links.unannotate_description(desc)
+        self.assertEqual("Monet's Cliff Walk", desc2)
+
+        desc = ("Monet's Cliff Walk\n"
+                "Mais aulas gratuitas em: "
+                "http://pt.khanacademy.org/video?v=2aUFB9hQncQ\n"
+                "All done.")
+        desc2 = add_ka_links.unannotate_description(desc)
+        self.assertEqual("Monet's Cliff Walk\nAll done.", desc2)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -32,9 +32,11 @@ def description_is_annotated(description):
 
 
 def unannotate_description(description):
+    call_to_action = r'(?:%s) https?://.+' % '|'.join([
+            re.escape(p) for p in _ALL_POSSIBLE_PREAMBLES])
     return re.sub(
-        r'^\s*(?:%s) https?://.+(?:\n\s*|$)' % '|'.join([
-            re.escape(p) for p in _ALL_POSSIBLE_PREAMBLES]),
+        r'^\s*%s(?:\n\s*|$)|\n\s*%s(?=\n|$)' %
+            (call_to_action, call_to_action),
         '',
         description or '')
 
@@ -45,7 +47,9 @@ def annotate_description(description, lang, url):
         description = unannotate_description(description)
     header = "%s %s" % (_DESCRIPTION_PREAMBLES[lang], url)
     if description:
-        return header + '\n' + description
+        lines = description.split('\n')
+        lines.insert(1, header)
+        return '\n'.join(lines)
     else:
         return header
 
