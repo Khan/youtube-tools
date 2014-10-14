@@ -19,6 +19,7 @@ _DESCRIPTION_PREAMBLES = {
     'www': u"More free lessons at:",
     'es': u"Más lecciones gratuitas en:",
     'pt': u"Mais aulas gratuitas em:",
+    'fr': u"Plus de cours gratuits en vidéo ici :",
 }
 
 # Keep any past preambles here so that we can properly unannotate descriptions
@@ -142,7 +143,7 @@ if __name__ == '__main__':
         '-n', '--dry-run', action='store_true', default=False,
         help='skip the actual description update requests')
     parser.add_argument(
-        '-l', '--language', default='www',
+        '-l', '--language', required=True,
         help='subdomain to use when grabbing topictree and making links (www, '
         'es, pt, etc.)')
     args = parser.parse_args()
